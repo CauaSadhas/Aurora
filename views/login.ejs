@@ -1,18 +1,20 @@
 <%- include('partials/head') %>
 <div class="auth-page">
   <section class="auth-hero">
-    <div class="brand large"><span class="brand-mark">A</span><span>Aurora<br><small>Gestor de tarefas</small></span></div>
-    <div><span class="eyebrow">Trabalho organizado, mente tranquila</span><h1>Cuide das tarefas sem perder de vista as pessoas.</h1><p>Kanban, planilha, calendário, checklists, cronômetros e obrigações mensais em um único lugar.</p></div>
+    <div class="auth-orb orb-one"></div><div class="auth-orb orb-two"></div>
+    <div class="brand large"><span class="brand-mark">A</span><span class="brand-copy">Aurora<small>Gestor de tarefas</small></span></div>
+    <div class="auth-message"><span class="eyebrow light">Trabalho organizado, mente tranquila</span><h1>Cuide das tarefas sem perder de vista as pessoas.</h1><p>Kanban, planilha, calendário, checklists, cronômetros e obrigações mensais em um único lugar.</p><div class="auth-feature-row"><span>✓ Rotina clara</span><span>✓ Tempo acompanhado</span><span>✓ Prazos sob controle</span></div></div>
     <div class="quote">“Em um mundo gelado, quem é caloroso e humano se destaca.”</div>
   </section>
   <section class="auth-form-wrap">
     <form class="auth-card" method="post" action="/login">
-      <h2>Bem-vindo de volta</h2><p>Entre para continuar seu dia com clareza.</p>
+      <div class="mobile-brand"><span class="brand-mark">A</span><strong>Aurora</strong></div>
+      <span class="auth-card-kicker">Acesse seu espaço</span><h2>Bem-vindo de volta</h2><p>Entre para continuar seu dia com clareza.</p>
       <% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.message %></div><% } %>
-      <label>E-mail<input type="email" name="email" required value="demo@gestor.local"></label>
-      <label>Senha<input type="password" name="password" required value="123456"></label>
-      <button class="button primary full" type="submit">Entrar</button>
-      <div class="demo-box"><strong>Acesso de demonstração</strong><span>demo@gestor.local</span><span>Senha: 123456</span></div>
+      <label>E-mail<div class="input-wrap"><span aria-hidden="true">@</span><input type="email" name="email" required value="demo@gestor.local" autocomplete="email"></div></label>
+      <label>Senha<div class="input-wrap"><span aria-hidden="true">•</span><input type="password" name="password" required value="123456" autocomplete="current-password"></div></label>
+      <button class="button primary full" type="submit">Entrar <span aria-hidden="true">→</span></button>
+      <div class="demo-box"><div><strong>Acesso de demonstração</strong><span>Use os dados já preenchidos acima.</span></div><span class="demo-pill">Pronto para testar</span></div>
       <p class="center">Ainda não tem conta? <a href="/register">Criar conta</a></p>
     </form>
   </section>

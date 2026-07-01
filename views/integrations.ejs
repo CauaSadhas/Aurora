@@ -1,7 +1,28 @@
 <%- include('partials/head') %><%- include('partials/sidebar', { boards:[] }) %>
-<header class="page-header"><div><span class="eyebrow">Conecte seu fluxo de trabalho</span><h1>Integrações</h1><p>Estrutura preparada para Gmail e WhatsApp Business.</p></div></header>
+<section class="page-hero compact-hero">
+  <div><span class="eyebrow">Conecte seu fluxo de trabalho</span><h1>Integrações</h1><p>Reúna mensagens e tarefas sem perder o contexto de cada cliente.</p></div>
+  <span class="coming-badge">Estrutura preparada</span>
+</section>
+
 <div class="integration-grid">
-  <article class="integration-card"><div class="integration-icon gmail">M</div><div><h2>Gmail</h2><p>Transforme mensagens em tarefas, vincule conversas e mantenha anexos organizados.</p></div><ul><li>Criar tarefa a partir de e-mail</li><li>Vincular conversa e anexos</li><li>Abrir mensagem original</li></ul><div class="integration-status"><span class="status-dot <%= integrations.gmail?'connected':'' %>"></span><%= integrations.gmail ? 'Modo '+integrations.gmail.status+' ativo' : 'Não conectado' %></div><% if(integrations.gmail){%><form method="post" action="/integrations/gmail/disconnect"><button class="button secondary full">Desconectar</button></form><%}else{%><form method="post" action="/integrations/gmail/demo-connect"><button class="button primary full">Ativar demonstração</button></form><%}%><small class="tech-note"><%= gmailConfigured?'Credenciais OAuth detectadas.':'Para conexão real, configure as credenciais OAuth do Google no arquivo .env.' %></small></article>
-  <article class="integration-card"><div class="integration-icon whatsapp">◉</div><div><h2>WhatsApp Business</h2><p>Envie lembretes, atualizações e solicitações diretamente a partir das tarefas.</p></div><ul><li>Mensagens por modelos aprovados</li><li>Atualizações de status</li><li>Solicitação de documentos</li></ul><div class="integration-status"><span class="status-dot <%= integrations.whatsapp?'connected':'' %>"></span><%= integrations.whatsapp ? 'Modo '+integrations.whatsapp.status+' ativo' : 'Não conectado' %></div><% if(integrations.whatsapp){%><form method="post" action="/integrations/whatsapp/disconnect"><button class="button secondary full">Desconectar</button></form><%}else{%><form method="post" action="/integrations/whatsapp/demo-connect"><button class="button primary full">Ativar demonstração</button></form><%}%><small class="tech-note"><%= whatsappConfigured?'Token da API detectado.':'Para conexão real, configure a API oficial do WhatsApp Business no arquivo .env.' %></small></article>
-</div><section class="panel notice-panel"><strong>Por que as conexões reais não vêm ativadas?</strong><p>O Gmail exige uma aplicação OAuth no Google Cloud. O WhatsApp exige uma conta comercial e acesso à API oficial da Meta. A primeira versão já possui a área de configuração e o modelo de dados para receber essas credenciais com segurança.</p></section>
+  <article class="integration-card">
+    <div class="integration-card-head"><div class="integration-icon gmail">M</div><span class="integration-badge <%= integrations.gmail?'connected':'' %>"><span></span><%= integrations.gmail ? 'Ativa' : 'Disponível' %></span></div>
+    <div><h2>Gmail</h2><p>Transforme mensagens em tarefas, vincule conversas e mantenha anexos organizados.</p></div>
+    <ul class="feature-list"><li><span>✓</span>Criar tarefa a partir de e-mail</li><li><span>✓</span>Vincular conversa e anexos</li><li><span>✓</span>Abrir a mensagem original</li></ul>
+    <div class="integration-status"><span class="status-dot <%= integrations.gmail?'connected':'' %>"></span><%= integrations.gmail ? 'Modo '+integrations.gmail.status+' ativo' : 'Não conectado' %></div>
+    <% if(integrations.gmail){%><form method="post" action="/integrations/gmail/disconnect"><button class="button secondary full">Desconectar</button></form><%}else{%><form method="post" action="/integrations/gmail/demo-connect"><button class="button primary full">Ativar demonstração</button></form><%}%>
+    <small class="tech-note"><%= gmailConfigured?'Credenciais OAuth detectadas.':'Para conexão real, configure as credenciais OAuth do Google.' %></small>
+  </article>
+
+  <article class="integration-card">
+    <div class="integration-card-head"><div class="integration-icon whatsapp">◉</div><span class="integration-badge <%= integrations.whatsapp?'connected':'' %>"><span></span><%= integrations.whatsapp ? 'Ativa' : 'Disponível' %></span></div>
+    <div><h2>WhatsApp Business</h2><p>Envie lembretes, atualizações e solicitações diretamente a partir das tarefas.</p></div>
+    <ul class="feature-list"><li><span>✓</span>Mensagens por modelos aprovados</li><li><span>✓</span>Atualizações de status</li><li><span>✓</span>Solicitação de documentos</li></ul>
+    <div class="integration-status"><span class="status-dot <%= integrations.whatsapp?'connected':'' %>"></span><%= integrations.whatsapp ? 'Modo '+integrations.whatsapp.status+' ativo' : 'Não conectado' %></div>
+    <% if(integrations.whatsapp){%><form method="post" action="/integrations/whatsapp/disconnect"><button class="button secondary full">Desconectar</button></form><%}else{%><form method="post" action="/integrations/whatsapp/demo-connect"><button class="button primary full">Ativar demonstração</button></form><%}%>
+    <small class="tech-note"><%= whatsappConfigured?'Token da API detectado.':'Para conexão real, configure a API oficial do WhatsApp Business.' %></small>
+  </article>
+</div>
+
+<section class="panel notice-panel"><span class="notice-icon" aria-hidden="true">i</span><div><strong>Por que as conexões reais ainda não vêm ativadas?</strong><p>O Gmail exige uma aplicação OAuth no Google Cloud. O WhatsApp exige uma conta comercial e acesso à API oficial da Meta. O sistema já possui a área de configuração e o modelo de dados para receber essas credenciais com segurança.</p></div></section>
 <%- include('partials/end') %>

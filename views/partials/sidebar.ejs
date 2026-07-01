@@ -1,17 +1,42 @@
 <div class="app-shell">
-  <aside class="sidebar">
-    <a class="brand" href="/dashboard"><span class="brand-mark">A</span><span>Aurora<br><small>Gestor de tarefas</small></span></a>
+  <aside class="sidebar" aria-label="Navegação principal">
+    <a class="brand" href="/dashboard" aria-label="Aurora, página inicial">
+      <span class="brand-mark" aria-hidden="true">A</span>
+      <span class="brand-copy">Aurora<small>Gestor de tarefas</small></span>
+    </a>
+
     <nav>
-      <a class="nav-link <%= title==='Início'?'active':'' %>" href="/dashboard">⌂ <span>Início</span></a>
+      <span class="nav-section-label">Espaço de trabalho</span>
+      <a class="nav-link <%= title==='Início'?'active':'' %>" href="/dashboard" <%= title==='Início'?'aria-current="page"':'' %>>
+        <span class="nav-icon" aria-hidden="true">⌂</span><span>Início</span>
+      </a>
       <% const firstBoard = (typeof boards !== 'undefined' && boards[0]) ? boards[0] : null; %>
-      <% if (firstBoard) { %><a class="nav-link" href="/boards/<%= firstBoard.id %>">▦ <span>Quadros</span></a><% } %>
-      <a class="nav-link <%= title==='Obrigações mensais'?'active':'' %>" href="/obligations">↻ <span>Obrigações</span></a>
-      <a class="nav-link <%= title==='Integrações'?'active':'' %>" href="/integrations">⌁ <span>Integrações</span></a>
+      <% if (firstBoard) { %>
+        <a class="nav-link <%= title===firstBoard.name?'active':'' %>" href="/boards/<%= firstBoard.id %>" <%= title===firstBoard.name?'aria-current="page"':'' %>>
+          <span class="nav-icon" aria-hidden="true">▦</span><span>Quadros</span>
+        </a>
+      <% } %>
+      <a class="nav-link <%= title==='Obrigações mensais'?'active':'' %>" href="/obligations" <%= title==='Obrigações mensais'?'aria-current="page"':'' %>>
+        <span class="nav-icon" aria-hidden="true">↻</span><span>Obrigações</span>
+      </a>
+      <a class="nav-link <%= title==='Integrações'?'active':'' %>" href="/integrations" <%= title==='Integrações'?'aria-current="page"':'' %>>
+        <span class="nav-icon" aria-hidden="true">⌁</span><span>Integrações</span>
+      </a>
     </nav>
+
+    <div class="sidebar-tip">
+      <span aria-hidden="true">✦</span>
+      <p><strong>Um passo de cada vez.</strong><small>Organização também é cuidado.</small></p>
+    </div>
+
     <div class="sidebar-bottom">
-      <div class="user-card"><span class="avatar"><%= user.name.charAt(0).toUpperCase() %></span><div><strong><%= user.name %></strong><small><%= user.email %></small></div></div>
-      <form method="post" action="/logout"><button class="link-button" type="submit">Sair da conta</button></form>
+      <div class="user-card">
+        <span class="avatar"><%= user.name.charAt(0).toUpperCase() %></span>
+        <div><strong><%= user.name %></strong><small><%= user.email %></small></div>
+      </div>
+      <form method="post" action="/logout"><button class="link-button logout-button" type="submit"><span aria-hidden="true">↪</span> Sair da conta</button></form>
     </div>
   </aside>
+
   <main class="main-content">
-    <% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.message %></div><% } %>
+    <% if (flash) { %><div class="flash <%= flash.type %>" role="status" data-auto-dismiss><%= flash.message %></div><% } %>

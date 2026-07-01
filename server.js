@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = Number(process.env.PORT || 3000);
 const IS_VERCEL = Boolean(process.env.VERCEL);
 
@@ -92,9 +93,19 @@ if (HAS_TURSO) {
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+app.use(express.urlencoded({ extended: true, limit: '250kb' }));
+app.use(express.json({ limit: '250kb' }));
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: true,
+  maxAge: IS_VERCEL ? '1h' : 0
+}));
 
 const sessionSecret = process.env.SESSION_SECRET || process.env.TURSO_AUTH_TOKEN || 'aurora-local-development-secret';
 app.use(cookieSession({

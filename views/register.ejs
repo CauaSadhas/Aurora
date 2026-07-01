@@ -1,8 +1,18 @@
 <%- include('partials/head') %>
 <div class="auth-page">
-  <section class="auth-hero"><div class="brand large"><span class="brand-mark">A</span><span>Aurora<br><small>Gestor de tarefas</small></span></div><div><span class="eyebrow">Seu espaço de organização</span><h1>Comece com uma rotina mais leve.</h1><p>Ao criar sua conta, um quadro inicial será preparado automaticamente.</p></div></section>
-  <section class="auth-form-wrap"><form class="auth-card" method="post" action="/register"><h2>Criar sua conta</h2><p>Seus dados ficarão separados e protegidos.</p>
+  <section class="auth-hero">
+    <div class="auth-orb orb-one"></div><div class="auth-orb orb-two"></div>
+    <div class="brand large"><span class="brand-mark">A</span><span class="brand-copy">Aurora<small>Gestor de tarefas</small></span></div>
+    <div class="auth-message"><span class="eyebrow light">Seu espaço de organização</span><h1>Comece com uma rotina mais leve.</h1><p>Ao criar sua conta, um quadro inicial será preparado automaticamente para você.</p><div class="auth-feature-row"><span>✓ Dados separados</span><span>✓ Quadro inicial pronto</span><span>✓ Acesso seguro</span></div></div>
+    <div class="quote">Organização não precisa ser fria. Ela pode cuidar de você.</div>
+  </section>
+  <section class="auth-form-wrap"><form class="auth-card" method="post" action="/register">
+    <div class="mobile-brand"><span class="brand-mark">A</span><strong>Aurora</strong></div>
+    <span class="auth-card-kicker">Comece agora</span><h2>Criar sua conta</h2><p>Seus dados ficarão separados e protegidos.</p>
     <% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.message %></div><% } %>
-    <label>Nome<input name="name" required minlength="2"></label><label>E-mail<input type="email" name="email" required></label><label>Senha<input type="password" name="password" required minlength="6"></label>
-    <button class="button primary full">Criar conta</button><p class="center">Já possui conta? <a href="/login">Entrar</a></p></form></section>
+    <label>Nome<div class="input-wrap"><span aria-hidden="true">☺</span><input name="name" required minlength="2" autocomplete="name"></div></label>
+    <label>E-mail<div class="input-wrap"><span aria-hidden="true">@</span><input type="email" name="email" required autocomplete="email"></div></label>
+    <label>Senha<div class="input-wrap"><span aria-hidden="true">•</span><input type="password" name="password" required minlength="6" autocomplete="new-password"></div></label>
+    <button class="button primary full">Criar conta <span aria-hidden="true">→</span></button><p class="center">Já possui conta? <a href="/login">Entrar</a></p>
+  </form></section>
 </div></body></html>
