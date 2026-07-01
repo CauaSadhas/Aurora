@@ -7,6 +7,11 @@ const fs = require('fs');
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const IS_VERCEL = Boolean(process.env.VERCEL);
+
+// A Vercel encerra o HTTPS no proxy antes de encaminhar a requisição ao Express.
+// Sem confiar nesse proxy, o Express enxerga a conexão como HTTP e o cookie
+// seguro da sessão não é gravado, causando um ciclo entre /login e /dashboard.
+if (IS_VERCEL) app.set('trust proxy', 1);
 const HAS_TURSO = Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
 const CONFIG_ERROR = IS_VERCEL && !HAS_TURSO;
 
