@@ -1,0 +1,21 @@
+{
+  "name": "aurora-gestor-tarefas-vercel",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Gestor de tarefas Aurora com Kanban, planilha, calendário, checklist, cronômetro e banco Turso.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --env-file-if-exists=.env --watch server.js"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@tursodatabase/serverless": "^1.2.3",
+    "bcryptjs": "^3.0.2",
+    "cookie-session": "^2.1.1",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0"
+  }
+}

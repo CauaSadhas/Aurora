@@ -1,0 +1,20 @@
+<%- include('partials/head') %>
+<div class="auth-page">
+  <section class="auth-hero">
+    <div class="brand large"><span class="brand-mark">A</span><span>Aurora<br><small>Gestor de tarefas</small></span></div>
+    <div><span class="eyebrow">Trabalho organizado, mente tranquila</span><h1>Cuide das tarefas sem perder de vista as pessoas.</h1><p>Kanban, planilha, calendário, checklists, cronômetros e obrigações mensais em um único lugar.</p></div>
+    <div class="quote">“Em um mundo gelado, quem é caloroso e humano se destaca.”</div>
+  </section>
+  <section class="auth-form-wrap">
+    <form class="auth-card" method="post" action="/login">
+      <h2>Bem-vindo de volta</h2><p>Entre para continuar seu dia com clareza.</p>
+      <% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.message %></div><% } %>
+      <label>E-mail<input type="email" name="email" required value="demo@gestor.local"></label>
+      <label>Senha<input type="password" name="password" required value="123456"></label>
+      <button class="button primary full" type="submit">Entrar</button>
+      <div class="demo-box"><strong>Acesso de demonstração</strong><span>demo@gestor.local</span><span>Senha: 123456</span></div>
+      <p class="center">Ainda não tem conta? <a href="/register">Criar conta</a></p>
+    </form>
+  </section>
+</div>
+</body></html>

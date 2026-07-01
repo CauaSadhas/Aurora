@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title><%= title %> · Aurora</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:linear-gradient(135deg,#fff7ed,#eff6ff);font-family:Inter,Arial,sans-serif;color:#172033}.card{width:min(720px,100%);background:rgba(255,255,255,.94);border:1px solid #e5e7eb;border-radius:24px;padding:32px;box-shadow:0 24px 80px rgba(15,23,42,.12)}.brand{display:flex;gap:12px;align-items:center;font-weight:800;color:#f97316}.logo{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:#fff7ed;font-size:22px}h1{font-size:32px;margin:24px 0 10px}p{line-height:1.65;color:#526070}.steps{display:grid;gap:12px;margin:24px 0}.step{display:flex;gap:14px;padding:16px;border-radius:16px;background:#f8fafc;border:1px solid #e2e8f0}.num{flex:0 0 30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#172033;color:white;font-weight:800}code{padding:3px 7px;border-radius:7px;background:#eef2ff;color:#3730a3;font-size:13px}.hint{padding:16px;border-left:4px solid #f97316;background:#fff7ed;border-radius:12px;color:#7c2d12}.small{font-size:13px;color:#64748b;margin-top:18px}@media(max-width:600px){.card{padding:22px}h1{font-size:26px}}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand"><div class="logo">☀️</div>Aurora · Gestor de Tarefas</div>
+    <h1>O site foi publicado, falta conectar o banco.</h1>
+    <p>A Vercel não mantém arquivos SQLite locais. Para que login, tarefas e cronômetros sejam salvos de verdade, conecte um banco Turso e faça um novo deploy.</p>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><div>Crie um banco no Turso chamado <strong>aurora-gestor</strong>.</div></div>
+      <div class="step"><div class="num">2</div><div>Na Vercel, abra <strong>Settings → Environment Variables</strong>.</div></div>
+      <div class="step"><div class="num">3</div><div>Adicione <code>TURSO_DATABASE_URL</code> e <code>TURSO_AUTH_TOKEN</code>.</div></div>
+      <div class="step"><div class="num">4</div><div>Em <strong>Deployments</strong>, escolha o último deploy e clique em <strong>Redeploy</strong>.</div></div>
+    </div>
+    <div class="hint">As tabelas e a conta de demonstração serão criadas automaticamente no primeiro acesso.</div>
+    <p class="small">Conta de demonstração após a conexão: demo@gestor.local · senha 123456</p>
+  </main>
+</body>
+</html>

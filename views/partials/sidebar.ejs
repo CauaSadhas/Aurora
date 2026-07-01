@@ -1,0 +1,17 @@
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="/dashboard"><span class="brand-mark">A</span><span>Aurora<br><small>Gestor de tarefas</small></span></a>
+    <nav>
+      <a class="nav-link <%= title==='Início'?'active':'' %>" href="/dashboard">⌂ <span>Início</span></a>
+      <% const firstBoard = (typeof boards !== 'undefined' && boards[0]) ? boards[0] : null; %>
+      <% if (firstBoard) { %><a class="nav-link" href="/boards/<%= firstBoard.id %>">▦ <span>Quadros</span></a><% } %>
+      <a class="nav-link <%= title==='Obrigações mensais'?'active':'' %>" href="/obligations">↻ <span>Obrigações</span></a>
+      <a class="nav-link <%= title==='Integrações'?'active':'' %>" href="/integrations">⌁ <span>Integrações</span></a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="user-card"><span class="avatar"><%= user.name.charAt(0).toUpperCase() %></span><div><strong><%= user.name %></strong><small><%= user.email %></small></div></div>
+      <form method="post" action="/logout"><button class="link-button" type="submit">Sair da conta</button></form>
+    </div>
+  </aside>
+  <main class="main-content">
+    <% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.message %></div><% } %>

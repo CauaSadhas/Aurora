@@ -1,0 +1,20 @@
+<%- include('partials/head') %><%- include('partials/sidebar', { boards }) %>
+<header class="page-header"><div><span class="eyebrow">Sua central de produtividade</span><h1>Olá, <%= user.name.split(' ')[0] %> 👋</h1><p>Veja o que precisa da sua atenção hoje.</p></div><button class="button primary" data-open-modal="new-board">+ Novo quadro</button></header>
+<section class="stats-grid">
+  <article class="stat-card"><span>Para hoje</span><strong><%= todayTasks.length %></strong><small>Tarefas com vencimento hoje</small></article>
+  <article class="stat-card danger"><span>Atrasadas</span><strong><%= overdue.length %></strong><small>Precisam de atenção</small></article>
+  <article class="stat-card"><span>Em foco</span><strong><%= running.length %></strong><small>Cronômetros ativos</small></article>
+  <article class="stat-card"><span>Tempo hoje</span><strong data-format-seconds="<%= totalSecondsToday %>">0h</strong><small>Tempo já registrado</small></article>
+</section>
+<div class="content-grid two-thirds">
+  <section class="panel"><div class="panel-head"><div><h2>Prioridades</h2><p>Tarefas de hoje e atrasadas</p></div></div>
+    <div class="task-list">
+      <% const priorities=[...overdue,...todayTasks.filter(t=>!overdue.some(o=>o.id===t.id))].slice(0,8); %>
+      <% if (!priorities.length) { %><div class="empty-state"><strong>Tudo em dia por aqui.</strong><span>Você pode abrir um quadro e criar a próxima tarefa.</span></div><% } %>
+      <% priorities.forEach(task => { %><a class="task-row" href="/boards/<%= task.board_id %>?task=<%= task.id %>"><span class="priority-dot <%= task.priority %>"></span><div><strong><%= task.title %></strong><small><%= task.client || task.board_name %> · <%= task.column_name %></small></div><time class="<%= task.due_date && task.due_date < new Date().toISOString().slice(0,10) ? 'late':'' %>"><%= task.due_date ? task.due_date.split('-').reverse().join('/') : 'Sem data' %></time></a><% }) %>
+    </div>
+  </section>
+  <section class="panel"><div class="panel-head"><div><h2>Seus quadros</h2><p>Escolha onde deseja trabalhar</p></div></div><div class="board-list"><% boards.forEach((board,i)=>{ %><a class="board-tile" href="/boards/<%= board.id %>"><span class="board-icon"><%= ['✦','◈','◆'][i%3] %></span><div><strong><%= board.name %></strong><small><%= board.description || 'Sem descrição' %></small></div><span>→</span></a><% }) %></div></section>
+</div>
+<div class="modal" id="new-board"><div class="modal-card"><button class="modal-close" data-close-modal>×</button><h2>Novo quadro</h2><p>Crie um espaço para um projeto, equipe ou área.</p><form method="post" action="/boards"><label>Nome<input name="name" required placeholder="Ex.: Clientes mensais"></label><label>Descrição<textarea name="description" rows="3" placeholder="Qual é o objetivo deste quadro?"></textarea></label><button class="button primary full">Criar quadro</button></form></div></div>
+<%- include('partials/end') %>
