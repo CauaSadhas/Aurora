@@ -53,6 +53,28 @@ class LocalDatabase {
   async all(sql, ...params) {
     return this.raw.prepare(sql).all(...params).map(normalizeRow);
   }
+
+  async batch(statements) {
+    this.raw.exec('BEGIN');
+    try {
+      let rowsAffected = 0;
+      let lastInsertRowid = null;
+      for (const statement of statements) {
+        const sql = typeof statement === 'string' ? statement : statement.sql;
+        const args = typeof statement === 'string' ? [] : (statement.args || []);
+        const result = this.raw.prepare(sql).run(...args);
+        rowsAffected += Number(result.changes || 0);
+        if (result.lastInsertRowid !== undefined && result.lastInsertRowid !== null) {
+          lastInsertRowid = result.lastInsertRowid;
+        }
+      }
+      this.raw.exec('COMMIT');
+      return { rowsAffected, lastInsertRowid };
+    } catch (error) {
+      this.raw.exec('ROLLBACK');
+      throw error;
+    }
+  }
 }
 
 class TursoDatabase {
@@ -77,6 +99,10 @@ class TursoDatabase {
     const rows = await this.raw.all(sql, ...params);
     return rows.map(normalizeRow);
   }
+
+  async batch(statements) {
+    return this.raw.batch(statements, 'immediate');
+  }
 }
 
 let db = null;
@@ -94,10 +120,15 @@ if (HAS_TURSO) {
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use((req, res, next) => {
+  const startedAt = Date.now();
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.on('finish', () => {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= 1500) console.warn(`[Aurora] Requisição lenta: ${req.method} ${req.path} — ${elapsed}ms`);
+  });
   next();
 });
 app.use(express.urlencoded({ extended: true, limit: '250kb' }));
@@ -126,6 +157,12 @@ app.use((req, res, next) => {
 
 async function initDatabase() {
   await db.exec(`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -228,7 +265,14 @@ async function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_board ON tasks(board_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_board_user_position ON tasks(board_id,user_id,column_id,position,id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_user_due ON tasks(user_id,due_date,completed_at);
+    CREATE INDEX IF NOT EXISTS idx_columns_board_position ON board_columns(board_id,position,id);
+    CREATE INDEX IF NOT EXISTS idx_checklist_task_position ON checklist_items(task_id,position,id);
     CREATE INDEX IF NOT EXISTS idx_time_entries_task ON time_entries(task_id);
+    CREATE INDEX IF NOT EXISTS idx_time_entries_task_running ON time_entries(task_id,ended_at,id);
+    CREATE INDEX IF NOT EXISTS idx_time_entries_user_day ON time_entries(user_id,started_at,ended_at);
+    CREATE INDEX IF NOT EXISTS idx_recurring_user_active ON recurring_tasks(user_id,active,last_generated_month);
   `);
 }
 
@@ -246,20 +290,17 @@ async function createDefaultWorkspace(userId, withDemoTasks = false) {
     ['Aguardando', 2, '#8b5cf6'],
     ['Concluído', 3, '#22c55e']
   ];
-  const columns = [];
-
-  for (const [name, position, color] of columnDefinitions) {
-    const result = await db.run(
-      'INSERT INTO board_columns (board_id,name,position,color) VALUES (?,?,?,?)',
-      boardId,
-      name,
-      position,
-      color
-    );
-    columns.push(Number(result.lastInsertRowid));
-  }
+  await db.batch(columnDefinitions.map(([name, position, color]) => ({
+    sql: 'INSERT INTO board_columns (board_id,name,position,color) VALUES (?,?,?,?)',
+    args: [boardId, name, position, color]
+  })));
 
   if (withDemoTasks) {
+    const columnRows = await db.all(
+      'SELECT id FROM board_columns WHERE board_id=? ORDER BY position,id',
+      boardId
+    );
+    const columns = columnRows.map((row) => Number(row.id));
     const today = new Date();
     const iso = (offset) => {
       const date = new Date(today);
@@ -283,42 +324,24 @@ async function createDefaultWorkspace(userId, withDemoTasks = false) {
       0
     );
 
-    await db.run(
-      `INSERT INTO tasks
-       (user_id,board_id,column_id,title,description,client,priority,due_date,estimated_minutes,position)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      userId,
-      boardId,
-      columns[1],
-      'Preparar relatório mensal',
-      'Consolidar informações e revisar antes do envio.',
-      'Empresa Modelo',
-      'normal',
-      iso(3),
-      120,
-      0
-    );
-
-    await db.run(
-      `INSERT INTO tasks
-       (user_id,board_id,column_id,title,description,client,priority,due_date,estimated_minutes,position)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      userId,
-      boardId,
-      columns[2],
-      'Aguardar retorno sobre notas fiscais',
-      'Cliente foi avisado e precisa enviar os arquivos faltantes.',
-      'João da Silva',
-      'urgent',
-      iso(-1),
-      30,
-      0
-    );
-
     const taskId = Number(firstTask.lastInsertRowid);
-    await db.run('INSERT INTO checklist_items (task_id,text,required,position) VALUES (?,?,?,?)', taskId, 'Verificar competência dos documentos', 1, 0);
-    await db.run('INSERT INTO checklist_items (task_id,text,required,position) VALUES (?,?,?,?)', taskId, 'Conferir valores e CNPJ', 1, 1);
-    await db.run('INSERT INTO checklist_items (task_id,text,required,position) VALUES (?,?,?,?)', taskId, 'Registrar pendências', 0, 2);
+    await db.batch([
+      {
+        sql: `INSERT INTO tasks
+          (user_id,board_id,column_id,title,description,client,priority,due_date,estimated_minutes,position)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        args: [userId, boardId, columns[1], 'Preparar relatório mensal', 'Consolidar informações e revisar antes do envio.', 'Empresa Modelo', 'normal', iso(3), 120, 0]
+      },
+      {
+        sql: `INSERT INTO tasks
+          (user_id,board_id,column_id,title,description,client,priority,due_date,estimated_minutes,position)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        args: [userId, boardId, columns[2], 'Aguardar retorno sobre notas fiscais', 'Cliente foi avisado e precisa enviar os arquivos faltantes.', 'João da Silva', 'urgent', iso(-1), 30, 0]
+      },
+      { sql: 'INSERT INTO checklist_items (task_id,text,required,position) VALUES (?,?,?,?)', args: [taskId, 'Verificar competência dos documentos', 1, 0] },
+      { sql: 'INSERT INTO checklist_items (task_id,text,required,position) VALUES (?,?,?,?)', args: [taskId, 'Conferir valores e CNPJ', 1, 1] },
+      { sql: 'INSERT INTO checklist_items (task_id,text,required,position) VALUES (?,?,?,?)', args: [taskId, 'Registrar pendências', 0, 2] }
+    ]);
   }
 
   return boardId;
@@ -333,7 +356,7 @@ async function seedDemo() {
       'INSERT INTO users (name,email,password_hash) VALUES (?,?,?)',
       'Conta Demonstração',
       'demo@gestor.local',
-      bcrypt.hashSync('123456', 12)
+      await bcrypt.hash('123456', 11)
     );
     await createDefaultWorkspace(Number(result.lastInsertRowid), true);
   } catch (error) {
@@ -341,13 +364,28 @@ async function seedDemo() {
   }
 }
 
-let readyPromise = Promise.resolve();
-if (db) {
-  readyPromise = (async () => {
-    await initDatabase();
-    await seedDemo();
-  })();
+const SCHEMA_VERSION = '8';
+
+async function ensureDatabaseReady() {
+  try {
+    const version = await db.get('SELECT value FROM app_meta WHERE key=?', 'schema_version');
+    if (String(version?.value || '') === SCHEMA_VERSION) return;
+  } catch (_) {
+    // Primeira implantação ou banco criado por uma versão anterior.
+  }
+
+  await initDatabase();
+  await seedDemo();
+  await db.run(
+    `INSERT INTO app_meta (key,value,updated_at)
+     VALUES ('schema_version',?,CURRENT_TIMESTAMP)
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
+    SCHEMA_VERSION
+  );
 }
+
+let readyPromise = Promise.resolve();
+if (db) readyPromise = ensureDatabaseReady();
 
 app.use(async (req, res, next) => {
   if (CONFIG_ERROR) {
@@ -376,13 +414,8 @@ function setFlash(req, type, message) {
   req.session.flash = { type, message };
 }
 
-async function userBoard(boardId, userId) {
-  return db.get('SELECT * FROM boards WHERE id = ? AND user_id = ?', boardId, userId);
-}
-
-async function userTask(taskId, userId) {
-  return db.get('SELECT * FROM tasks WHERE id = ? AND user_id = ?', taskId, userId);
-}
+const recurringGenerationCache = new Map();
+const RECURRING_CHECK_TTL_MS = 1000 * 60 * 30;
 
 async function generateRecurringForUser(userId) {
   const templates = await db.all('SELECT * FROM recurring_tasks WHERE user_id = ? AND active = 1', userId);
@@ -423,52 +456,297 @@ async function generateRecurringForUser(userId) {
       checklist = [];
     }
 
-    for (let index = 0; index < checklist.length; index += 1) {
-      await db.run(
-        'INSERT INTO checklist_items (task_id,text,required,position) VALUES (?,?,?,?)',
-        taskId,
-        String(checklist[index]),
-        1,
-        index
-      );
-    }
-
-    await db.run('UPDATE recurring_tasks SET last_generated_month = ? WHERE id = ?', currentMonth, item.id);
+    const statements = checklist.map((text, index) => ({
+      sql: 'INSERT INTO checklist_items (task_id,text,required,position) VALUES (?,?,?,?)',
+      args: [taskId, String(text), 1, index]
+    }));
+    statements.push({
+      sql: 'UPDATE recurring_tasks SET last_generated_month = ? WHERE id = ?',
+      args: [currentMonth, item.id]
+    });
+    await db.batch(statements);
   }
 }
 
-async function durationForTask(taskId) {
-  const entries = await db.all('SELECT * FROM time_entries WHERE task_id = ?', taskId);
-  const now = Date.now();
-  return entries.reduce((sum, entry) => {
-    if (entry.ended_at) return sum + Number(entry.duration_seconds || 0);
-    return sum + Math.max(0, Math.floor((now - new Date(entry.started_at).getTime()) / 1000));
-  }, 0);
+async function maybeGenerateRecurringForUser(userId, force = false) {
+  const month = new Date().toISOString().slice(0, 7);
+  const key = `${userId}:${month}`;
+  const lastCheck = recurringGenerationCache.get(key) || 0;
+  if (!force && Date.now() - lastCheck < RECURRING_CHECK_TTL_MS) return;
+
+  recurringGenerationCache.set(key, Date.now());
+  try {
+    await generateRecurringForUser(userId);
+  } catch (error) {
+    recurringGenerationCache.delete(key);
+    throw error;
+  }
 }
 
-async function enrichTasks(tasks) {
-  return Promise.all(tasks.map(async (task) => {
-    const checklist = await db.all('SELECT * FROM checklist_items WHERE task_id = ? ORDER BY position,id', task.id);
-    const runningTimer = await db.get(
-      'SELECT * FROM time_entries WHERE task_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1',
-      task.id
-    );
-    const done = checklist.filter((item) => Number(item.done) === 1).length;
-
-    return {
-      ...task,
-      checklist,
-      checklistDone: done,
-      checklistTotal: checklist.length,
-      totalSeconds: await durationForTask(task.id),
-      runningTimer: runningTimer || null
-    };
-  }));
+function parseJson(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return fallback;
+  }
 }
 
-async function requireAuth(req, res, next) {
+function hydrateTask(task) {
+  if (!task) return null;
+  const numberKeys = [
+    'id', 'user_id', 'board_id', 'column_id', 'estimated_minutes', 'position',
+    'checklistDone', 'checklistTotal', 'totalSeconds', 'runningId'
+  ];
+  const normalized = { ...task };
+  for (const key of numberKeys) normalized[key] = Number(normalized[key] || 0);
+  normalized.runningTimer = normalized.runningId
+    ? { id: normalized.runningId }
+    : null;
+  return normalized;
+}
+
+const TASK_JSON = `json_object(
+  'id', id,
+  'user_id', user_id,
+  'board_id', board_id,
+  'column_id', column_id,
+  'title', title,
+  'description', description,
+  'client', client,
+  'priority', priority,
+  'due_date', due_date,
+  'estimated_minutes', estimated_minutes,
+  'position', position,
+  'completed_at', completed_at,
+  'created_at', created_at,
+  'updated_at', updated_at,
+  'column_name', column_name,
+  'board_name', board_name,
+  'checklistDone', checklist_done,
+  'checklistTotal', checklist_total,
+  'totalSeconds', total_seconds,
+  'runningId', running_id
+)`;
+
+const TASK_ROWS_SQL = `
+  SELECT
+    t.*,
+    bc.name AS column_name,
+    b.name AS board_name,
+    COALESCE((SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id=t.id),0) AS checklist_total,
+    COALESCE((SELECT SUM(ci.done) FROM checklist_items ci WHERE ci.task_id=t.id),0) AS checklist_done,
+    COALESCE((
+      SELECT SUM(
+        CASE
+          WHEN te.ended_at IS NULL THEN MAX(0, CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s',te.started_at) AS INTEGER))
+          ELSE COALESCE(te.duration_seconds,0)
+        END
+      )
+      FROM time_entries te
+      WHERE te.task_id=t.id
+    ),0) AS total_seconds,
+    COALESCE((
+      SELECT te.id
+      FROM time_entries te
+      WHERE te.task_id=t.id AND te.ended_at IS NULL
+      ORDER BY te.id DESC
+      LIMIT 1
+    ),0) AS running_id
+  FROM tasks t
+  JOIN board_columns bc ON bc.id=t.column_id
+  JOIN boards b ON b.id=t.board_id
+`;
+
+async function loadDashboardSnapshot(userId, today) {
+  const row = await db.get(`
+    WITH task_rows AS (
+      ${TASK_ROWS_SQL}
+      WHERE t.user_id=?
+      ORDER BY CASE WHEN t.due_date IS NULL THEN 1 ELSE 0 END, t.due_date, t.id DESC
+    )
+    SELECT
+      COALESCE((
+        SELECT json_group_array(json_object(
+          'id', id,
+          'user_id', user_id,
+          'name', name,
+          'description', description,
+          'created_at', created_at
+        ))
+        FROM (SELECT * FROM boards WHERE user_id=? ORDER BY id)
+      ), '[]') AS boards_json,
+      COALESCE((SELECT json_group_array(${TASK_JSON}) FROM task_rows), '[]') AS tasks_json,
+      COALESCE((
+        SELECT SUM(duration_seconds)
+        FROM time_entries
+        WHERE user_id=? AND ended_at IS NOT NULL AND substr(started_at,1,10)=?
+      ),0) AS total_today
+  `, userId, userId, userId, today);
+
+  return {
+    boards: parseJson(row?.boards_json, []).map((board) => ({ ...board, id: Number(board.id), user_id: Number(board.user_id) })),
+    tasks: parseJson(row?.tasks_json, []).map(hydrateTask),
+    totalSecondsToday: Number(row?.total_today || 0)
+  };
+}
+
+async function loadBoardSnapshot(boardId, userId, selectedId = 0) {
+  const row = await db.get(`
+    WITH task_rows AS (
+      ${TASK_ROWS_SQL}
+      WHERE t.board_id=? AND t.user_id=?
+      ORDER BY t.position, t.id DESC
+    )
+    SELECT
+      (
+        SELECT json_object(
+          'id', id,
+          'user_id', user_id,
+          'name', name,
+          'description', description,
+          'created_at', created_at
+        )
+        FROM boards
+        WHERE id=? AND user_id=?
+      ) AS board_json,
+      COALESCE((
+        SELECT json_group_array(json_object(
+          'id', id,
+          'board_id', board_id,
+          'name', name,
+          'position', position,
+          'color', color
+        ))
+        FROM (SELECT * FROM board_columns WHERE board_id=? ORDER BY position,id)
+      ), '[]') AS columns_json,
+      COALESCE((SELECT json_group_array(${TASK_JSON}) FROM task_rows), '[]') AS tasks_json,
+      (SELECT ${TASK_JSON} FROM task_rows WHERE id=?) AS selected_json,
+      COALESCE((
+        SELECT json_group_array(json_object(
+          'id', id,
+          'task_id', task_id,
+          'text', text,
+          'done', done,
+          'required', required,
+          'position', position
+        ))
+        FROM (
+          SELECT ci.*
+          FROM checklist_items ci
+          JOIN tasks t ON t.id=ci.task_id
+          WHERE ci.task_id=? AND t.user_id=? AND t.board_id=?
+          ORDER BY ci.position,ci.id
+        )
+      ), '[]') AS checklist_json
+  `, boardId, userId, boardId, userId, boardId, selectedId, selectedId, userId, boardId);
+
+  const board = parseJson(row?.board_json, null);
+  if (!board) return null;
+
+  const tasks = parseJson(row?.tasks_json, []).map(hydrateTask);
+  const selectedTask = hydrateTask(parseJson(row?.selected_json, null));
+  if (selectedTask) {
+    selectedTask.checklist = parseJson(row?.checklist_json, []).map((item) => ({
+      ...item,
+      id: Number(item.id),
+      task_id: Number(item.task_id),
+      done: Number(item.done),
+      required: Number(item.required),
+      position: Number(item.position)
+    }));
+  }
+
+  return {
+    board: { ...board, id: Number(board.id), user_id: Number(board.user_id) },
+    columns: parseJson(row?.columns_json, []).map((column) => ({
+      ...column,
+      id: Number(column.id),
+      board_id: Number(column.board_id),
+      position: Number(column.position)
+    })),
+    tasks,
+    selectedTask
+  };
+}
+
+async function loadObligationsSnapshot(userId) {
+  const row = await db.get(`
+    SELECT
+      COALESCE((
+        SELECT json_group_array(json_object(
+          'id', r.id,
+          'user_id', r.user_id,
+          'board_id', r.board_id,
+          'column_id', r.column_id,
+          'title', r.title,
+          'description', r.description,
+          'client', r.client,
+          'priority', r.priority,
+          'day_of_month', r.day_of_month,
+          'create_days_before', r.create_days_before,
+          'checklist_json', r.checklist_json,
+          'active', r.active,
+          'last_generated_month', r.last_generated_month,
+          'created_at', r.created_at,
+          'board_name', b.name,
+          'column_name', bc.name
+        ))
+        FROM recurring_tasks r
+        JOIN boards b ON b.id=r.board_id
+        JOIN board_columns bc ON bc.id=r.column_id
+        WHERE r.user_id=?
+        ORDER BY r.day_of_month
+      ), '[]') AS templates_json,
+      COALESCE((
+        SELECT json_group_array(json_object(
+          'id', id,
+          'user_id', user_id,
+          'name', name,
+          'description', description,
+          'created_at', created_at
+        ))
+        FROM (SELECT * FROM boards WHERE user_id=? ORDER BY name)
+      ), '[]') AS boards_json,
+      COALESCE((
+        SELECT json_group_array(json_object(
+          'id', bc.id,
+          'board_id', bc.board_id,
+          'name', bc.name,
+          'position', bc.position,
+          'color', bc.color
+        ))
+        FROM board_columns bc
+        JOIN boards b ON b.id=bc.board_id
+        WHERE b.user_id=?
+        ORDER BY bc.board_id,bc.position
+      ), '[]') AS columns_json
+  `, userId, userId, userId);
+
+  return {
+    templates: parseJson(row?.templates_json, []).map((item) => ({
+      ...item,
+      id: Number(item.id),
+      user_id: Number(item.user_id),
+      board_id: Number(item.board_id),
+      column_id: Number(item.column_id),
+      day_of_month: Number(item.day_of_month),
+      create_days_before: Number(item.create_days_before),
+      active: Number(item.active)
+    })),
+    boards: parseJson(row?.boards_json, []).map((board) => ({ ...board, id: Number(board.id), user_id: Number(board.user_id) })),
+    columns: parseJson(row?.columns_json, []).map((column) => ({
+      ...column,
+      id: Number(column.id),
+      board_id: Number(column.board_id),
+      position: Number(column.position)
+    }))
+  };
+}
+
+function requireAuth(req, res, next) {
   if (!req.session?.user) return res.redirect('/login');
-  await generateRecurringForUser(Number(req.session.user.id));
   return next();
 }
 
@@ -479,7 +757,7 @@ app.get('/login', (req, res) => res.render('login', { title: 'Entrar' }));
 app.post('/login', async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const user = await db.get('SELECT * FROM users WHERE email = ?', email);
-  if (!user || !bcrypt.compareSync(String(req.body.password || ''), user.password_hash)) {
+  if (!user || !(await bcrypt.compare(String(req.body.password || ''), user.password_hash))) {
     setFlash(req, 'error', 'E-mail ou senha incorretos.');
     return res.redirect('/login');
   }
@@ -505,7 +783,7 @@ app.post('/register', async (req, res) => {
       'INSERT INTO users (name,email,password_hash) VALUES (?,?,?)',
       name,
       email,
-      bcrypt.hashSync(password, 12)
+      await bcrypt.hash(password, 11)
     );
     const userId = Number(result.lastInsertRowid);
     await createDefaultWorkspace(userId, false);
@@ -524,29 +802,15 @@ app.post('/logout', (req, res) => {
 
 app.get('/dashboard', requireAuth, async (req, res) => {
   const userId = Number(req.session.user.id);
-  const boards = await db.all('SELECT * FROM boards WHERE user_id = ? ORDER BY id', userId);
-  const rawTasks = await db.all(
-    `SELECT t.*, bc.name column_name, b.name board_name
-     FROM tasks t
-     JOIN board_columns bc ON bc.id=t.column_id
-     JOIN boards b ON b.id=t.board_id
-     WHERE t.user_id=?
-     ORDER BY CASE WHEN t.due_date IS NULL THEN 1 ELSE 0 END, t.due_date`,
-    userId
-  );
-  const tasks = await enrichTasks(rawTasks);
+  await maybeGenerateRecurringForUser(userId);
+
   const today = new Date().toISOString().slice(0, 10);
+  const snapshot = await loadDashboardSnapshot(userId, today);
+  const { boards, tasks, totalSecondsToday } = snapshot;
   const todayTasks = tasks.filter((task) => task.due_date === today && !task.completed_at);
   const overdue = tasks.filter((task) => task.due_date && task.due_date < today && !task.completed_at);
   const running = tasks.filter((task) => task.runningTimer);
   const completed = tasks.filter((task) => task.completed_at);
-  const totalRow = await db.get(
-    `SELECT COALESCE(SUM(duration_seconds),0) total
-     FROM time_entries
-     WHERE user_id=? AND ended_at IS NOT NULL AND substr(started_at,1,10)=?`,
-    userId,
-    today
-  );
 
   res.render('dashboard', {
     title: 'Início',
@@ -556,7 +820,7 @@ app.get('/dashboard', requireAuth, async (req, res) => {
     overdue,
     running,
     completed,
-    totalSecondsToday: Number(totalRow?.total || 0)
+    totalSecondsToday
   });
 });
 
@@ -578,279 +842,265 @@ app.post('/boards', requireAuth, async (req, res) => {
     ['Concluído', '#22c55e']
   ];
 
-  for (let index = 0; index < defaults.length; index += 1) {
-    const [columnName, color] = defaults[index];
-    await db.run(
-      'INSERT INTO board_columns (board_id,name,position,color) VALUES (?,?,?,?)',
-      boardId,
-      columnName,
-      index,
-      color
-    );
-  }
+  await db.batch(defaults.map(([columnName, color], index) => ({
+    sql: 'INSERT INTO board_columns (board_id,name,position,color) VALUES (?,?,?,?)',
+    args: [boardId, columnName, index, color]
+  })));
 
   return res.redirect(`/boards/${boardId}`);
 });
 
 app.get('/boards/:id', requireAuth, async (req, res) => {
   const userId = Number(req.session.user.id);
-  const board = await userBoard(Number(req.params.id), userId);
-  if (!board) return res.status(404).send('Quadro não encontrado');
+  const boardId = Number(req.params.id);
+  const selectedId = req.query.task ? Number(req.query.task) : 0;
+  const snapshot = await loadBoardSnapshot(boardId, userId, selectedId);
+  if (!snapshot) return res.status(404).send('Quadro não encontrado');
 
   const view = ['kanban', 'table', 'calendar', 'list'].includes(req.query.view) ? req.query.view : 'kanban';
-  const columns = await db.all('SELECT * FROM board_columns WHERE board_id=? ORDER BY position,id', board.id);
-  const rawTasks = await db.all(
-    'SELECT * FROM tasks WHERE board_id=? AND user_id=? ORDER BY position,id DESC',
-    board.id,
-    userId
-  );
-  const tasks = await enrichTasks(rawTasks);
-  const selected = req.query.task ? await userTask(Number(req.query.task), userId) : null;
-  const selectedTask = selected ? (await enrichTasks([selected]))[0] : null;
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month || ''))
     ? String(req.query.month)
     : new Date().toISOString().slice(0, 7);
 
-  return res.render('board', { title: board.name, board, columns, tasks, view, selectedTask, month });
+  return res.render('board', {
+    title: snapshot.board.name,
+    board: snapshot.board,
+    columns: snapshot.columns,
+    tasks: snapshot.tasks,
+    view,
+    selectedTask: snapshot.selectedTask,
+    month
+  });
 });
 
 app.post('/boards/:id/columns', requireAuth, async (req, res) => {
-  const board = await userBoard(Number(req.params.id), Number(req.session.user.id));
-  if (!board) return res.status(404).send('Quadro não encontrado');
-
-  const positionRow = await db.get(
-    'SELECT COALESCE(MAX(position),-1)+1 p FROM board_columns WHERE board_id=?',
-    board.id
+  const boardId = Number(req.params.id);
+  const userId = Number(req.session.user.id);
+  const inserted = await db.get(
+    `INSERT INTO board_columns (board_id,name,position,color)
+     SELECT b.id,?,COALESCE((SELECT MAX(position)+1 FROM board_columns WHERE board_id=b.id),0),'#64748b'
+     FROM boards b
+     WHERE b.id=? AND b.user_id=?
+     RETURNING board_id`,
+    String(req.body.name || 'Nova coluna').trim() || 'Nova coluna',
+    boardId,
+    userId
   );
-  await db.run(
-    'INSERT INTO board_columns (board_id,name,position,color) VALUES (?,?,?,?)',
-    board.id,
-    String(req.body.name || 'Nova coluna'),
-    Number(positionRow.p),
-    '#64748b'
-  );
-  return res.redirect(`/boards/${board.id}`);
+  if (!inserted) return res.status(404).send('Quadro não encontrado');
+  return res.redirect(`/boards/${boardId}`);
 });
 
 app.post('/tasks', requireAuth, async (req, res) => {
   const userId = Number(req.session.user.id);
-  const board = await userBoard(Number(req.body.board_id), userId);
-  if (!board) return res.status(400).send('Quadro inválido');
-
-  const column = await db.get(
-    'SELECT * FROM board_columns WHERE id=? AND board_id=?',
-    Number(req.body.column_id),
-    board.id
-  );
-  if (!column) return res.status(400).send('Coluna inválida');
-
-  const result = await db.run(
+  const boardId = Number(req.body.board_id);
+  const columnId = Number(req.body.column_id);
+  const inserted = await db.get(
     `INSERT INTO tasks
      (user_id,board_id,column_id,title,description,client,priority,due_date,estimated_minutes,position)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+     SELECT ?,b.id,bc.id,?,?,?,?,?,?,0
+     FROM boards b
+     JOIN board_columns bc ON bc.board_id=b.id
+     WHERE b.id=? AND b.user_id=? AND bc.id=?
+     RETURNING id,board_id`,
     userId,
-    board.id,
-    column.id,
-    String(req.body.title || 'Nova tarefa').trim(),
+    String(req.body.title || 'Nova tarefa').trim() || 'Nova tarefa',
     String(req.body.description || ''),
     String(req.body.client || ''),
     String(req.body.priority || 'normal'),
     req.body.due_date || null,
     Number(req.body.estimated_minutes || 0),
-    0
+    boardId,
+    userId,
+    columnId
   );
-
-  return res.redirect(`/boards/${board.id}?task=${Number(result.lastInsertRowid)}`);
+  if (!inserted) return res.status(400).send('Quadro ou coluna inválida');
+  return res.redirect(`/boards/${Number(inserted.board_id)}?task=${Number(inserted.id)}`);
 });
 
 app.post('/tasks/:id/update', requireAuth, async (req, res) => {
-  const task = await userTask(Number(req.params.id), Number(req.session.user.id));
-  if (!task) return res.status(404).send('Tarefa não encontrada');
-
-  await db.run(
+  const taskId = Number(req.params.id);
+  const updated = await db.get(
     `UPDATE tasks
-     SET title=?,description=?,client=?,priority=?,due_date=?,estimated_minutes=?,updated_at=CURRENT_TIMESTAMP
-     WHERE id=?`,
-    String(req.body.title || task.title),
+     SET title=COALESCE(NULLIF(?,''),title),description=?,client=?,priority=?,due_date=?,estimated_minutes=?,updated_at=CURRENT_TIMESTAMP
+     WHERE id=? AND user_id=?
+     RETURNING id,board_id`,
+    String(req.body.title || '').trim(),
     String(req.body.description || ''),
     String(req.body.client || ''),
     String(req.body.priority || 'normal'),
     req.body.due_date || null,
     Number(req.body.estimated_minutes || 0),
-    task.id
+    taskId,
+    Number(req.session.user.id)
   );
-  return res.redirect(`/boards/${task.board_id}?task=${task.id}`);
+  if (!updated) return res.status(404).send('Tarefa não encontrada');
+  return res.redirect(`/boards/${Number(updated.board_id)}?task=${Number(updated.id)}`);
 });
 
 app.post('/tasks/:id/delete', requireAuth, async (req, res) => {
-  const task = await userTask(Number(req.params.id), Number(req.session.user.id));
-  if (!task) return res.status(404).send('Tarefa não encontrada');
-
-  await db.run('DELETE FROM tasks WHERE id=?', task.id);
-  return res.redirect(`/boards/${task.board_id}`);
+  const deleted = await db.get(
+    'DELETE FROM tasks WHERE id=? AND user_id=? RETURNING board_id',
+    Number(req.params.id),
+    Number(req.session.user.id)
+  );
+  if (!deleted) return res.status(404).send('Tarefa não encontrada');
+  return res.redirect(`/boards/${Number(deleted.board_id)}`);
 });
 
 app.post('/api/tasks/:id/move', requireAuth, async (req, res) => {
-  const task = await userTask(Number(req.params.id), Number(req.session.user.id));
-  if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
-
-  const column = await db.get(
-    'SELECT * FROM board_columns WHERE id=? AND board_id=?',
-    Number(req.body.column_id),
-    task.board_id
+  const taskId = Number(req.params.id);
+  const columnId = Number(req.body.column_id);
+  const completedAt = new Date().toISOString();
+  const updated = await db.get(
+    `UPDATE tasks
+     SET column_id=?,
+         completed_at=CASE
+           WHEN lower(COALESCE((SELECT name FROM board_columns WHERE id=?),'') ) LIKE '%conclu%'
+             OR lower(COALESCE((SELECT name FROM board_columns WHERE id=?),'') ) LIKE '%finaliz%'
+           THEN ?
+           ELSE NULL
+         END,
+         updated_at=CURRENT_TIMESTAMP
+     WHERE id=? AND user_id=?
+       AND EXISTS (
+         SELECT 1 FROM board_columns bc
+         WHERE bc.id=? AND bc.board_id=tasks.board_id
+       )
+     RETURNING id`,
+    columnId,
+    columnId,
+    columnId,
+    completedAt,
+    taskId,
+    Number(req.session.user.id),
+    columnId
   );
-  if (!column) return res.status(400).json({ error: 'Coluna inválida' });
-
-  const isDone = /conclu|finaliz/i.test(column.name);
-  await db.run(
-    'UPDATE tasks SET column_id=?,completed_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    column.id,
-    isDone ? new Date().toISOString() : null,
-    task.id
-  );
+  if (!updated) return res.status(400).json({ error: 'Tarefa ou coluna inválida' });
   return res.json({ ok: true });
 });
 
 app.post('/tasks/:id/checklist', requireAuth, async (req, res) => {
-  const task = await userTask(Number(req.params.id), Number(req.session.user.id));
-  if (!task) return res.status(404).send('Tarefa não encontrada');
-
-  const positionRow = await db.get(
-    'SELECT COALESCE(MAX(position),-1)+1 p FROM checklist_items WHERE task_id=?',
-    task.id
-  );
+  const taskId = Number(req.params.id);
   const text = String(req.body.text || '').trim();
-  if (text) {
-    await db.run(
-      'INSERT INTO checklist_items (task_id,text,required,position) VALUES (?,?,?,?)',
-      task.id,
-      text,
-      req.body.required ? 1 : 0,
-      Number(positionRow.p)
-    );
-  }
-  return res.redirect(`/boards/${task.board_id}?task=${task.id}`);
+  if (!text) return res.redirect(req.get('referer') || '/dashboard');
+
+  const inserted = await db.get(
+    `INSERT INTO checklist_items (task_id,text,required,position)
+     SELECT t.id,?,?,COALESCE((SELECT MAX(position)+1 FROM checklist_items WHERE task_id=t.id),0)
+     FROM tasks t
+     WHERE t.id=? AND t.user_id=?
+     RETURNING task_id`,
+    text,
+    req.body.required ? 1 : 0,
+    taskId,
+    Number(req.session.user.id)
+  );
+  if (!inserted) return res.status(404).send('Tarefa não encontrada');
+  return res.redirect(req.get('referer') || '/dashboard');
 });
 
 app.post('/checklist/:id/toggle', requireAuth, async (req, res) => {
-  const item = await db.get(
-    `SELECT ci.*,t.user_id,t.board_id
-     FROM checklist_items ci
-     JOIN tasks t ON t.id=ci.task_id
-     WHERE ci.id=?`,
-    Number(req.params.id)
+  const updated = await db.get(
+    `UPDATE checklist_items
+     SET done=CASE done WHEN 1 THEN 0 ELSE 1 END
+     WHERE id=? AND EXISTS (
+       SELECT 1 FROM tasks t
+       WHERE t.id=checklist_items.task_id AND t.user_id=?
+     )
+     RETURNING task_id`,
+    Number(req.params.id),
+    Number(req.session.user.id)
   );
-  if (!item || Number(item.user_id) !== Number(req.session.user.id)) {
-    return res.status(404).send('Item não encontrado');
-  }
-
-  await db.run(
-    'UPDATE checklist_items SET done=CASE done WHEN 1 THEN 0 ELSE 1 END WHERE id=?',
-    item.id
-  );
-  return res.redirect(`/boards/${item.board_id}?task=${item.task_id}`);
+  if (!updated) return res.status(404).send('Item não encontrado');
+  return res.redirect(req.get('referer') || '/dashboard');
 });
 
 app.post('/tasks/:id/timer/start', requireAuth, async (req, res) => {
   const userId = Number(req.session.user.id);
-  const task = await userTask(Number(req.params.id), userId);
-  if (!task) return res.status(404).send('Tarefa não encontrada');
-
-  const running = await db.get(
-    'SELECT id FROM time_entries WHERE user_id=? AND ended_at IS NULL',
+  await db.get(
+    `INSERT INTO time_entries (task_id,user_id,started_at)
+     SELECT t.id,?,?
+     FROM tasks t
+     WHERE t.id=? AND t.user_id=?
+       AND NOT EXISTS (SELECT 1 FROM time_entries WHERE user_id=? AND ended_at IS NULL)
+     RETURNING task_id`,
+    userId,
+    new Date().toISOString(),
+    Number(req.params.id),
+    userId,
     userId
   );
-  if (!running) {
-    await db.run(
-      'INSERT INTO time_entries (task_id,user_id,started_at) VALUES (?,?,?)',
-      task.id,
-      userId,
-      new Date().toISOString()
-    );
-  }
-  return res.redirect(req.get('referer') || `/boards/${task.board_id}?task=${task.id}`);
+  return res.redirect(req.get('referer') || '/dashboard');
 });
 
 app.post('/tasks/:id/timer/stop', requireAuth, async (req, res) => {
-  const userId = Number(req.session.user.id);
-  const task = await userTask(Number(req.params.id), userId);
-  if (!task) return res.status(404).send('Tarefa não encontrada');
-
-  const running = await db.get(
-    `SELECT * FROM time_entries
-     WHERE task_id=? AND user_id=? AND ended_at IS NULL
-     ORDER BY id DESC LIMIT 1`,
-    task.id,
-    userId
+  const end = new Date().toISOString();
+  await db.get(
+    `UPDATE time_entries
+     SET ended_at=?,
+         duration_seconds=MAX(1,CAST(strftime('%s',?) AS INTEGER)-CAST(strftime('%s',started_at) AS INTEGER))
+     WHERE id=(
+       SELECT te.id
+       FROM time_entries te
+       JOIN tasks t ON t.id=te.task_id
+       WHERE t.id=? AND t.user_id=? AND te.user_id=? AND te.ended_at IS NULL
+       ORDER BY te.id DESC
+       LIMIT 1
+     )
+     RETURNING task_id`,
+    end,
+    end,
+    Number(req.params.id),
+    Number(req.session.user.id),
+    Number(req.session.user.id)
   );
-
-  if (running) {
-    const end = new Date();
-    const seconds = Math.max(1, Math.floor((end.getTime() - new Date(running.started_at).getTime()) / 1000));
-    await db.run(
-      'UPDATE time_entries SET ended_at=?,duration_seconds=? WHERE id=?',
-      end.toISOString(),
-      seconds,
-      running.id
-    );
-  }
-
-  return res.redirect(req.get('referer') || `/boards/${task.board_id}?task=${task.id}`);
+  return res.redirect(req.get('referer') || '/dashboard');
 });
 
 app.get('/obligations', requireAuth, async (req, res) => {
   const userId = Number(req.session.user.id);
-  const templates = await db.all(
-    `SELECT r.*,b.name board_name,bc.name column_name
-     FROM recurring_tasks r
-     JOIN boards b ON b.id=r.board_id
-     JOIN board_columns bc ON bc.id=r.column_id
-     WHERE r.user_id=?
-     ORDER BY r.day_of_month`,
-    userId
-  );
-  const boards = await db.all('SELECT * FROM boards WHERE user_id=? ORDER BY name', userId);
-  const columns = await db.all(
-    `SELECT bc.*
-     FROM board_columns bc
-     JOIN boards b ON b.id=bc.board_id
-     WHERE b.user_id=?
-     ORDER BY bc.board_id,bc.position`,
-    userId
-  );
-  return res.render('obligations', { title: 'Obrigações mensais', templates, boards, columns });
+  await maybeGenerateRecurringForUser(userId);
+  const snapshot = await loadObligationsSnapshot(userId);
+  return res.render('obligations', {
+    title: 'Obrigações mensais',
+    templates: snapshot.templates,
+    boards: snapshot.boards,
+    columns: snapshot.columns
+  });
 });
 
 app.post('/obligations', requireAuth, async (req, res) => {
   const userId = Number(req.session.user.id);
-  const board = await userBoard(Number(req.body.board_id), userId);
-  const column = board
-    ? await db.get('SELECT * FROM board_columns WHERE id=? AND board_id=?', Number(req.body.column_id), board.id)
-    : null;
-  if (!board || !column) return res.status(400).send('Quadro ou coluna inválida');
-
+  const boardId = Number(req.body.board_id);
+  const columnId = Number(req.body.column_id);
   const checklist = String(req.body.checklist || '')
     .split('\n')
     .map((item) => item.trim())
     .filter(Boolean);
 
-  await db.run(
+  const inserted = await db.get(
     `INSERT INTO recurring_tasks
      (user_id,board_id,column_id,title,description,client,priority,day_of_month,create_days_before,checklist_json)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+     SELECT ?,b.id,bc.id,?,?,?,?,?,?,?
+     FROM boards b
+     JOIN board_columns bc ON bc.board_id=b.id
+     WHERE b.id=? AND b.user_id=? AND bc.id=?
+     RETURNING id`,
     userId,
-    board.id,
-    column.id,
-    String(req.body.title || 'Obrigação mensal'),
+    String(req.body.title || 'Obrigação mensal').trim() || 'Obrigação mensal',
     String(req.body.description || ''),
     String(req.body.client || ''),
     String(req.body.priority || 'normal'),
     Math.min(31, Math.max(1, Number(req.body.day_of_month || 1))),
     Math.max(0, Number(req.body.create_days_before || 5)),
-    JSON.stringify(checklist)
+    JSON.stringify(checklist),
+    boardId,
+    userId,
+    columnId
   );
+  if (!inserted) return res.status(400).send('Quadro ou coluna inválida');
 
-  await generateRecurringForUser(userId);
+  await maybeGenerateRecurringForUser(userId, true);
   setFlash(req, 'success', 'Obrigação mensal criada.');
   return res.redirect('/obligations');
 });
@@ -906,8 +1156,20 @@ app.post('/integrations/:provider/disconnect', requireAuth, async (req, res) => 
   return res.redirect('/integrations');
 });
 
-app.get('/health', (req, res) => {
-  res.json({ ok: true, database: databaseMode, time: new Date().toISOString() });
+app.get('/health', async (req, res) => {
+  const startedAt = Date.now();
+  let databaseLatencyMs = null;
+  if (db) {
+    await db.get('SELECT 1 AS ok');
+    databaseLatencyMs = Date.now() - startedAt;
+  }
+  res.json({
+    ok: true,
+    database: databaseMode,
+    databaseLatencyMs,
+    region: process.env.VERCEL_REGION || 'local',
+    time: new Date().toISOString()
+  });
 });
 
 app.use((req, res) => res.status(404).render('not-found', { title: 'Página não encontrada' }));

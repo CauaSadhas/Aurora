@@ -2,15 +2,30 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "installCommand": "npm ci --registry=https://registry.npmjs.org --no-audit --no-fund",
+  "fluid": true,
   "rewrites": [
     {
       "source": "/(.*)",
       "destination": "/api/index"
     }
   ],
+  "headers": [
+    {
+      "source": "/aurora-v8.css",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/aurora-v8.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ],
   "functions": {
     "api/index.js": {
-      "includeFiles": "{views/**,public/**}"
+      "includeFiles": "views/**"
     }
   }
 }

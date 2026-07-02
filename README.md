@@ -1,15 +1,20 @@
-# Aurora — Gestor de Tarefas v3
+# Aurora — Gestor de Tarefas V8
 
-Versão preparada para publicação na Vercel com uma função explícita em `api/index.js`.
+Gestor de tarefas responsivo com login, banco de dados, Kanban, planilha, calendário, lista, checklists, cronômetros e obrigações mensais.
+
+A V8 foi otimizada para Vercel e Turso, reduzindo significativamente a quantidade de consultas remotas por página.
 
 ## Recursos
 
-- Cadastro, login e senha criptografada;
-- Banco SQLite local durante o desenvolvimento;
+- Cadastro e login com senha protegida;
+- Banco SQLite no computador;
 - Banco Turso persistente na Vercel;
-- Kanban, planilha, calendário e lista;
-- Checklists, cronômetro e obrigações mensais;
-- Estrutura preparada para Gmail e WhatsApp Business.
+- Visualizações Kanban, planilha, calendário e lista;
+- Checklists e cronômetros por tarefa;
+- Obrigações mensais automáticas;
+- Estrutura preparada para Gmail e WhatsApp Business;
+- Interface responsiva para computador e celular;
+- Diagnóstico de conexão e latência em `/health`.
 
 ## Rodar no computador
 
@@ -22,9 +27,24 @@ Acesse `http://localhost:3000`.
 
 ## Publicar na Vercel
 
-Envie todos os arquivos deste pacote para a raiz do repositório. A primeira tela do GitHub deve mostrar `api`, `public`, `views`, `package.json`, `server.js` e `vercel.json`.
+Envie todos os arquivos para a raiz do repositório. Na primeira tela do GitHub devem aparecer diretamente:
 
-Na Vercel, deixe o Root Directory na raiz do repositório, desligue qualquer Override de Build Command e Output Directory, e faça um Redeploy sem usar o cache.
+```text
+api
+public
+views
+package.json
+server.js
+vercel.json
+```
+
+As variáveis necessárias são:
+
+```text
+TURSO_DATABASE_URL
+TURSO_AUTH_TOKEN
+SESSION_SECRET
+```
 
 ## Conta de demonstração
 
